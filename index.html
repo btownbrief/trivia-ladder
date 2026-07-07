@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Local Trivia Ladder · Btown Games</title>
+  <meta name="description" content="Five Burlington &amp; Vermont trivia questions a day, easiest to hardest. Climb the ladder, beat your neighbors. From the Btown Brief." />
+  <meta property="og:title" content="Local Trivia Ladder" />
+  <meta property="og:description" content="Five local questions a day, easiest to hardest. How far up the ladder can you climb?" />
+  <meta property="og:image" content="https://btownbrief.github.io/trivia-ladder/assets/og-image.png" />
+  <meta property="og:url" content="https://btownbrief.github.io/trivia-ladder/" />
+  <meta name="theme-color" content="#161233" />
+  <link rel="icon" href="assets/icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="assets/icon-180.png" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <h1>LOCAL <span>TRIVIA</span> LADDER</h1>
+    <div class="daybar" id="dayBar"></div>
+  </header>
+
+  <main>
+    <!-- Intro -->
+    <section id="introScreen" class="screen">
+      <div class="marquee">
+        <div class="rules">
+          <p><strong>Five questions a day</strong> about Burlington &amp; Vermont, easiest to hardest.</p>
+          <ul>
+            <li>🪜 Climb all 5 rungs — a miss scores zero but you keep climbing</li>
+            <li>⏱️ 25 seconds per question, with a speed bonus</li>
+            <li>📰 The top rung is sometimes fresh from the Btown Brief — readers have the edge</li>
+            <li>🏆 One shot per day. Same ladder for everyone.</li>
+          </ul>
+        </div>
+        <div class="ladder-preview" id="ladderPreview" aria-hidden="true"></div>
+      </div>
+      <button class="btn-primary" id="startBtn">Climb today's ladder</button>
+      <div class="streak-note" id="introStreak"></div>
+    </section>
+
+    <!-- Game -->
+    <section id="gameScreen" class="screen hidden">
+      <div class="game-grid">
+        <aside class="ladder" id="ladder" aria-label="Ladder progress"></aside>
+        <div class="qarea">
+          <div class="timerbar"><div id="timerFill"></div></div>
+          <div class="qmeta">
+            <span id="rungLabel"></span>
+            <span id="qTimer">25</span>
+          </div>
+          <div class="qcard">
+            <p id="qText"></p>
+            <div id="choices"></div>
+          </div>
+          <div id="reveal" class="reveal hidden">
+            <p id="revealHead"></p>
+            <p id="revealText"></p>
+            <p class="src"><a id="revealSrc" href="#" target="_blank" rel="noopener">Source ↗</a></p>
+            <button class="btn-primary" id="nextBtn">Next rung ↑</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Results -->
+    <section id="resultsScreen" class="screen hidden">
+      <h2 id="verdict"></h2>
+      <div class="scoreline"><span id="finalScore"></span><span class="max">/ 2000 + bonus</span></div>
+      <div class="streak-note" id="streakNote"></div>
+      <div id="recap" class="recap"></div>
+      <div class="share-row">
+        <button class="btn-primary" id="shareBtn">Share your ladder</button>
+        <span id="shareDone" class="share-done hidden">Copied!</span>
+      </div>
+      <div class="countdown">Next ladder in <span id="countdown"></span></div>
+
+      <div class="lb hidden" id="lb">
+        <div class="lb-tabs">
+          <button class="chip sel" id="lbThisBtn">🏆 This Month</button>
+          <button class="chip" id="lbLastBtn">Last Month</button>
+        </div>
+        <div class="lb-status" id="lbStatus"></div>
+        <ol id="lbList"></ol>
+        <div class="lb-form hidden" id="lbForm">
+          <input id="lbNameInput" maxlength="20" placeholder="Your name" autocomplete="off" />
+          <button class="chip" id="lbSaveBtn">Save</button>
+        </div>
+        <button class="chip lb-rename hidden" id="lbRenameBtn">✏️ Change name</button>
+      </div>
+
+      <a class="cta" href="https://www.btownbrief.com" target="_blank" rel="noopener">📰 Get the edge — read the Btown Brief →</a>
+    </section>
+  </main>
+
+  <footer>
+    A <strong>Btown Games</strong> production · Read the <a href="https://www.btownbrief.com" target="_blank" rel="noopener">Btown Brief</a>
+  </footer>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
