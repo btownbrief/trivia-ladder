@@ -13,7 +13,7 @@ const STATE_KEY = 'trivia-ladder-state';
 const TEST_DATE = new URLSearchParams(location.search).get('testdate');
 
 const VERDICTS = [
-  [1800, 'Town Elder 🏛️ You ARE the Btown Brief.'],
+  [1800, 'Town Elder 🏛️ You ARE the BTown Brief.'],
   [1500, 'Church Street Royalty 👑'],
   [1100, 'Certified Burlingtonian 🍁'],
   [700, 'Solid Local 🛶 You know your creemees.'],
