@@ -1,16 +1,30 @@
 // LOCAL TRIVIA LADDER — daily 5-question climb for Btown Games.
-import { loadBank, dailyLadder, todayKey, RUNG_POINTS } from './questions.js';
+import {
+  loadBank, dailyLadder, duelQuestionIndices, duelLadder, todayKey, RUNG_POINTS,
+} from './questions.js';
 import {
   lbEnabled, getName, submitScore, renamePlayer, fetchTop, monthLabel, playerId,
 } from './leaderboard.js';
+import {
+  Duel,
+  getName as duelGetName,
+  savedSession as duelSavedSession,
+  clearSession as duelClearSession,
+} from './duel.js';
+import { makeDuelResult, compareDuelResults } from './duel-rules.js';
 
 const $ = (id) => document.getElementById(id);
 const TIMER_MS = 25000;
 const STATE_KEY = 'trivia-ladder-state';
+const DUEL_GAME = 'trivia-ladder';
+const DUEL_NAME_KEY = 'trivia-ladder-duel-name';
 
 // ?testdate=YYYY-MM-DD plays another day's ladder without saving anything
 // or touching the leaderboard — for testing only.
-const TEST_DATE = new URLSearchParams(location.search).get('testdate');
+const QUERY = new URLSearchParams(location.search);
+const TEST_DATE = QUERY.get('testdate');
+const DUEL_REQUESTED = QUERY.get('duel') === '1';
+const ISOLATED_PLAY = Boolean(TEST_DATE) || DUEL_REQUESTED;
 
 const VERDICTS = [
   [1800, 'Town Elder 🏛️ You ARE the BTown Brief.'],
@@ -26,9 +40,11 @@ const VERDICTS = [
 function loadState() {
   try { return JSON.parse(localStorage.getItem(STATE_KEY)) || {}; } catch { return {}; }
 }
-function saveState(s) { if (!TEST_DATE) localStorage.setItem(STATE_KEY, JSON.stringify(s)); }
+function saveState(s) {
+  if (!ISOLATED_PLAY) localStorage.setItem(STATE_KEY, JSON.stringify(s));
+}
 
-let state = TEST_DATE ? {} : loadState();
+let state = ISOLATED_PLAY ? {} : loadState();
 state.results = state.results || {};   // date -> { rungs:[{correct,points}], score, submitted }
 state.streak = state.streak || { count: 0, lastDate: '' };
 
@@ -39,6 +55,9 @@ let rungResults = [];  // [{correct, points, qId}]
 let deadline = 0;
 let timerInt = null;
 let answered = false;
+let duel = null;
+let duelSubmitted = false;
+let duelStartedAt = 0;
 
 // resume partial progress after a refresh (no retry-scumming)
 if (state.progress && state.progress.date !== today) delete state.progress;
@@ -66,21 +85,12 @@ try {
   $('introScreen').innerHTML = `<p style="text-align:center">Couldn't load today's questions (${e.message}). Try a refresh?</p>`;
   throw e;
 }
-ladder = dailyLadder(bank, today);
-
-if (state.results[today]) {
-  // already played — hard block, straight to results
-  showResults(state.results[today], false);
-} else if (state.progress && state.progress.date === today) {
-  rungResults = state.progress.rungs;
-  rungIndex = rungResults.length;
-  startGame();
-}
 
 $('startBtn').addEventListener('click', startGame);
 
 // ------------------------------------------------------------ game flow
 function startGame() {
+  if (duelActive() && !duelStartedAt) duelStartedAt = Date.now();
   $('introScreen').classList.add('hidden');
   $('resultsScreen').classList.add('hidden');
   $('gameScreen').classList.remove('hidden');
@@ -185,6 +195,13 @@ $('nextBtn').addEventListener('click', () => {
 // ------------------------------------------------------------ results
 function finishDay() {
   const score = rungResults.reduce((s, r) => s + r.points, 0);
+  if (duelActive()) {
+    clearInterval(timerInt);
+    $('gameScreen').classList.add('hidden');
+    const ms = Math.max(0, Date.now() - duelStartedAt);
+    void duelSubmit(makeDuelResult(score, ms));
+    return;
+  }
   // streak
   const yesterday = new Date(Date.parse(today + 'T12:00:00Z') - 86400000).toISOString().slice(0, 10);
   state.streak = {
@@ -274,7 +291,7 @@ if (lbEnabled()) {
 }
 
 async function submitOnce() {
-  if (TEST_DATE) return; // test plays never touch the board
+  if (ISOLATED_PLAY) return; // test plays and friend duels never touch the board
   const r = state.results[today];
   if (!r || r.submitted || r.score <= 0 || !getName()) return;
   await submitScore(r.score);
@@ -364,3 +381,427 @@ document.addEventListener('keydown', (e) => {
   const n = Number(e.key);
   if (n >= 1 && n <= 4) answer(n - 1);
 });
+
+// ------------------------------------------------------------ duel mode
+// ⚔️ Friend climbs use a payload of { q: [five bank indices] } to pin one
+// deterministic question per difficulty. Deals are rejected if any selected
+// question is on today's live ladder. Daily saves, streaks, results, and
+// leaderboard writes are gated above; only room/session keys persist.
+
+function duelActive() {
+  return DUEL_REQUESTED && duel !== null;
+}
+let duelPanelIntent = 'host';
+let duelChallengeKey = '';
+
+function duelUrl() {
+  return '?duel=1';
+}
+
+function validDuelPayload(payload) {
+  if (!payload || !Array.isArray(payload.q)) return false;
+  try {
+    const challenge = duelLadder(bank, payload.q);
+    const liveIds = new Set(dailyLadder(bank, todayKey()).map((q) => q.id));
+    return challenge.every((question) => !liveIds.has(question.id));
+  } catch {
+    return false;
+  }
+}
+
+function freshDuelPayload() {
+  const liveIds = new Set(dailyLadder(bank, todayKey()).map((q) => q.id));
+  for (let attempt = 0; attempt < 1000; attempt++) {
+    const seed = crypto.getRandomValues(new Uint32Array(1))[0];
+    const q = duelQuestionIndices(bank, seed);
+    const challenge = duelLadder(bank, q);
+    if (challenge.every((question) => !liveIds.has(question.id))) return { q };
+  }
+  throw new Error('Could not deal a separate friend ladder');
+}
+
+const FRIENDLY_DUEL_ERRORS = {
+  not_found: 'That friend climb has vanished — start a fresh one.',
+  not_seated: 'That seat is no longer yours — start a fresh climb.',
+  room_full: 'That ladder already has two climbers.',
+  room_started: 'That ladder already started without you.',
+  not_ready: 'Friend climbs are not switched on yet — check back soon.',
+  offline: 'Can’t reach the trivia desk — are you online?',
+  opponent_left: 'Your rival stepped off the ladder.',
+};
+function duelFriendly(err) {
+  if (err && err.code === 'wrong_game') {
+    return `That code belongs to ${String(err.detail || 'another game').replace(/-/g, ' ')}.`;
+  }
+  return (err && FRIENDLY_DUEL_ERRORS[err.code]) || 'The trivia desk stumbled — please try again.';
+}
+
+function snapshotLeaderboardIdentity() {
+  return {
+    id: localStorage.getItem('btown-player-id'),
+    name: localStorage.getItem('btown-player-name'),
+  };
+}
+
+function restoreLeaderboardIdentity(previous) {
+  for (const [key, value] of [
+    ['btown-player-id', previous.id],
+    ['btown-player-name', previous.name],
+  ]) {
+    if (value === null) localStorage.removeItem(key);
+    else localStorage.setItem(key, value);
+  }
+}
+
+function rememberDuelName(name) {
+  localStorage.setItem(DUEL_NAME_KEY, name.trim().slice(0, 24));
+}
+
+function openDuelPanel(intent) {
+  duelPanelIntent = intent;
+  $('duelOverlay').classList.add('hidden');
+  $('opTitle').textContent = intent === 'host' ? 'Start a friend climb' : 'Join a friend climb';
+  $('opGo').textContent = intent === 'host' ? 'Get a code' : 'Climb!';
+  $('opCodeWrap').classList.toggle('hidden', intent === 'host');
+  $('opError').classList.add('hidden');
+  $('opName').value = $('opName').value
+    || localStorage.getItem(DUEL_NAME_KEY)
+    || duelGetName();
+  $('onlinePanel').classList.remove('hidden');
+  (intent === 'join' && $('opName').value ? $('opCode') : $('opName')).focus();
+}
+
+async function duelGo() {
+  if ($('opGo').disabled) return;
+  const name = $('opName').value.trim();
+  if (!name) {
+    $('opError').textContent = 'Every climber needs a name.';
+    $('opError').classList.remove('hidden');
+    $('opName').focus();
+    return;
+  }
+  $('opGo').disabled = true;
+  $('opError').classList.add('hidden');
+  const previousLeaderboardIdentity = snapshotLeaderboardIdentity();
+  rememberDuelName(name);
+  try {
+    if (duelPanelIntent === 'host') {
+      const d = await Duel.create({
+        game: DUEL_GAME,
+        name,
+        payload: freshDuelPayload(),
+      });
+      $('onlinePanel').classList.add('hidden');
+      openDuelLobby(d);
+    } else {
+      const code = $('opCode').value.trim();
+      if (code.length !== 4) {
+        $('opError').textContent = 'A climb code is 4 letters.';
+        $('opError').classList.remove('hidden');
+        $('opCode').focus();
+        return;
+      }
+      const d = await Duel.join({ game: DUEL_GAME, code, name });
+      if (!validDuelPayload(d.payload)) throw new Error('Invalid duel payload');
+      location.href = duelUrl();
+    }
+  } catch (err) {
+    $('opError').textContent = duelFriendly(err);
+    $('opError').classList.remove('hidden');
+  } finally {
+    // rooms.js shares the fleet identity id/name; restore both so opening a
+    // duel cannot mint or rename this game's monthly leaderboard identity.
+    restoreLeaderboardIdentity(previousLeaderboardIdentity);
+    $('opGo').disabled = false;
+  }
+}
+
+function openDuelLobby(d) {
+  if ($('lobby')._duel && $('lobby')._duel !== d) $('lobby')._duel.stop();
+  $('lobby')._duel = d;
+  $('lobbyCode').textContent = d.code;
+  $('lobby').classList.remove('hidden');
+  d.start({
+    onChange: () => {
+      $('lobbyError').classList.add('hidden');
+      if (d.status !== 'waiting') location.href = duelUrl();
+    },
+    onError: (err) => {
+      $('lobbyError').textContent = `${duelFriendly(err)} You can still call off the climb.`;
+      $('lobbyError').classList.remove('hidden');
+      if (err && ['not_found', 'not_seated', 'room_started'].includes(err.code)) {
+        duelClearSession(DUEL_GAME);
+      }
+    },
+  });
+}
+
+function cancelDuelLobby() {
+  const d = $('lobby')._duel;
+  if (d) void d.leave();
+  $('lobby')._duel = null;
+  $('lobby').classList.add('hidden');
+}
+
+function refreshDuelRejoin() {
+  const saved = duelSavedSession(DUEL_GAME);
+  const btn = $('rejoinBtn');
+  btn.classList.toggle('hidden', !saved || duelActive());
+  if (saved) btn.textContent = `↩ Rejoin climb ${saved.code}`;
+}
+
+async function rejoinDuel() {
+  $('rejoinBtn').disabled = true;
+  $('opError').classList.add('hidden');
+  try {
+    const d = await Duel.resume({ game: DUEL_GAME });
+    if (d.status === 'waiting') {
+      $('duelOverlay').classList.add('hidden');
+      openDuelLobby(d);
+    } else if (validDuelPayload(d.payload)) {
+      location.href = duelUrl();
+    } else {
+      throw new Error('Invalid duel payload');
+    }
+  } catch (err) {
+    // Transient failures keep the saved session. Only terminal room errors
+    // remove the rejoin path.
+    if (err && ['not_found', 'not_seated', 'room_started'].includes(err.code)) {
+      duelClearSession(DUEL_GAME);
+      refreshDuelRejoin();
+    }
+    $('opError').textContent = duelFriendly(err);
+    $('opError').classList.remove('hidden');
+    $('onlinePanel').classList.remove('hidden');
+  } finally {
+    $('rejoinBtn').disabled = false;
+  }
+}
+
+function exitDuel() {
+  if (duel) {
+    if (duel.isComplete()) void duel.leave();
+    else duel.stop(); // preserve an unfinished session for later rejoin
+  }
+  location.replace(location.pathname);
+}
+
+function duelOpponent() {
+  return duel ? (duel.others()[0] || {}) : {};
+}
+
+function renderDuelBar() {
+  if (!duel) return;
+  const opp = duelOpponent();
+  const who = opp.name ? `vs ${opp.name}` : 'waiting for your rival';
+  let note = '';
+  if (opp.left && !duel.isComplete()) note = ' — they stepped off';
+  else if (duelSubmitted && !duel.isComplete()) note = ' — waiting on their score…';
+  $('duelBarText').textContent = `⚔️ CLIMB ${duel.code} · ${who}${note}`;
+  $('duelBar').classList.remove('hidden');
+}
+
+function formatDuelTime(ms) {
+  const tenths = Math.floor(ms / 100);
+  const minutes = Math.floor(tenths / 600);
+  const seconds = Math.floor((tenths % 600) / 10);
+  return `${minutes}:${String(seconds).padStart(2, '0')}.${tenths % 10}`;
+}
+
+function formatDuelResult(result) {
+  if (!result) return 'waiting…';
+  if (result.gaveUp) return 'forfeited';
+  return `${result.score} pts · ${formatDuelTime(result.ms)}`;
+}
+
+function addDuelResultRow(label, result, winner) {
+  const row = document.createElement('div');
+  row.className = `duel-row${winner ? ' win' : ''}`;
+  const name = document.createElement('span');
+  name.textContent = label;
+  const score = document.createElement('span');
+  score.className = 'duel-time';
+  score.textContent = formatDuelResult(result);
+  row.append(name, score);
+  $('duelDoneRows').appendChild(row);
+}
+
+function showDuelWaiting(message = 'LADDER LOCKED IN 🪜') {
+  const opp = duelOpponent();
+  $('duelDoneHead').textContent = opp.left
+    ? 'YOUR RIVAL STEPPED OFF'
+    : message;
+  $('duelDoneRows').innerHTML = '';
+  addDuelResultRow('You', duel.myResult(), true);
+  addDuelResultRow(opp.name || 'Rival', opp.result, false);
+  $('duelRematchBtn').classList.add('hidden');
+  $('duelExitBtn').textContent = 'Back to today’s ladder';
+  $('duelDone').classList.remove('hidden');
+}
+
+function showDuelDeadEnd(message) {
+  $('introScreen').classList.add('hidden');
+  $('gameScreen').classList.add('hidden');
+  $('resultsScreen').classList.add('hidden');
+  $('duelDoneHead').textContent = message;
+  $('duelDoneRows').innerHTML = '';
+  $('duelRematchBtn').classList.add('hidden');
+  $('duelExitBtn').textContent = 'Back to today’s ladder';
+  $('duelDone').classList.remove('hidden');
+}
+
+function showDuelDone() {
+  duel.stop();
+  const mine = duel.myResult();
+  const opp = duelOpponent();
+  const theirs = opp.result;
+  const outcome = compareDuelResults(mine, theirs);
+  $('duelDoneHead').textContent = outcome === 0
+    ? 'DEAD EVEN — DRAW! 🪜'
+    : outcome > 0
+      ? 'YOU TOPPED THE LADDER! 🏆'
+      : `${(opp.name || 'YOUR RIVAL').toUpperCase()} TAKES IT`;
+  $('duelDoneRows').innerHTML = '';
+  addDuelResultRow('You', mine, outcome >= 0);
+  addDuelResultRow(opp.name || 'Rival', theirs, outcome <= 0);
+  $('duelRematchBtn').classList.remove('hidden');
+  $('duelExitBtn').textContent = 'Back to today’s ladder';
+  $('duelDone').classList.remove('hidden');
+}
+
+async function duelSubmit(result) {
+  if (!duel || duelSubmitted) return;
+  duelSubmitted = true;
+  renderDuelBar();
+  showDuelWaiting('POSTING YOUR CLIMB…');
+  try {
+    await duel.submitResult(result);
+  } catch (err) {
+    if (err && err.code === 'opponent_left') {
+      showDuelWaiting();
+      return;
+    }
+    duelSubmitted = false;
+    showDuelDeadEnd(`${duelFriendly(err)} Your climb was not posted.`);
+    return;
+  }
+  if (duel.isComplete()) showDuelDone();
+  else showDuelWaiting();
+}
+
+async function abandonDuel() {
+  if (!duelActive() || duelSubmitted) {
+    exitDuel();
+    return;
+  }
+  $('duelAbandonBtn').disabled = true;
+  const ms = duelStartedAt ? Date.now() - duelStartedAt : 0;
+  await duelSubmit(makeDuelResult(0, ms, true));
+  duel.stop();
+  location.replace(location.pathname); // saved session can rejoin the comparison
+}
+
+async function bootDuel() {
+  try {
+    duel = await Duel.resume({ game: DUEL_GAME });
+  } catch (err) {
+    if (err && ['not_found', 'not_seated', 'room_started'].includes(err.code)) {
+      duelClearSession(DUEL_GAME);
+    }
+    showDuelDeadEnd(duelFriendly(err));
+    return 'blocked';
+  }
+  if (!validDuelPayload(duel.payload)) {
+    showDuelDeadEnd('This friend ladder is unreadable. Head back and start a fresh one.');
+    return 'blocked';
+  }
+  duelChallengeKey = duel.payload.q.join(',');
+  duelSubmitted = duel.myResult() !== null;
+  renderDuelBar();
+  duel.start({
+    onChange: () => {
+      if (!validDuelPayload(duel.payload)) {
+        showDuelDeadEnd('This friend ladder is unreadable. Head back and start a fresh one.');
+        return;
+      }
+      if (duel.payload.q.join(',') !== duelChallengeKey) {
+        location.replace(duelUrl());
+        return;
+      }
+      renderDuelBar();
+      if (duel.isComplete()) showDuelDone();
+      else if (duel.myResult()) showDuelWaiting();
+    },
+    onError: (err) => {
+      if (err && ['not_found', 'not_seated', 'room_started'].includes(err.code)) {
+        duelClearSession(DUEL_GAME);
+      }
+      showDuelDeadEnd(duelFriendly(err));
+    },
+  });
+  if (duel.isComplete()) {
+    showDuelDone();
+    return 'done';
+  }
+  if (duelSubmitted) {
+    showDuelWaiting();
+    return 'waiting';
+  }
+  return 'play';
+}
+
+async function duelRematch() {
+  if (!duel) return;
+  $('duelRematchBtn').disabled = true;
+  try {
+    await duel.rematch(freshDuelPayload());
+    location.href = duelUrl();
+  } catch (err) {
+    $('duelDoneHead').textContent = duelFriendly(err);
+    $('duelRematchBtn').disabled = false;
+  }
+}
+
+$('duelBtn').addEventListener('click', () => {
+  refreshDuelRejoin();
+  $('duelOverlay').classList.remove('hidden');
+});
+$('hostBtn').addEventListener('click', () => openDuelPanel('host'));
+$('joinBtn').addEventListener('click', () => openDuelPanel('join'));
+$('opCancel').addEventListener('click', () => $('onlinePanel').classList.add('hidden'));
+$('opGo').addEventListener('click', duelGo);
+$('lobbyCancel').addEventListener('click', cancelDuelLobby);
+$('rejoinBtn').addEventListener('click', rejoinDuel);
+$('duelRematchBtn').addEventListener('click', duelRematch);
+$('duelExitBtn').addEventListener('click', exitDuel);
+$('duelAbandonBtn').addEventListener('click', abandonDuel);
+$('opCode').addEventListener('input', () => {
+  $('opCode').value = $('opCode').value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+});
+['opName', 'opCode'].forEach((id) => $(id).addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') duelGo();
+}));
+document.querySelectorAll('#duelOverlay [data-close]').forEach((button) => {
+  button.addEventListener('click', () => $('duelOverlay').classList.add('hidden'));
+});
+
+refreshDuelRejoin();
+
+if (DUEL_REQUESTED) {
+  const duelMode = await bootDuel();
+  if (duelMode === 'play') {
+    ladder = duelLadder(bank, duel.payload.q);
+    $('dayBar').textContent = 'FRIEND CLIMB · SAME FIVE QUESTIONS';
+    startGame();
+  }
+} else {
+  ladder = dailyLadder(bank, today);
+  if (state.results[today]) {
+    // already played — hard block, straight to results
+    showResults(state.results[today], false);
+  } else if (state.progress && state.progress.date === today) {
+    rungResults = state.progress.rungs;
+    rungIndex = rungResults.length;
+    startGame();
+  }
+}

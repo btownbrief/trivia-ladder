@@ -16,9 +16,14 @@
 </head>
 <body>
   <header>
+    <button class="duel-launch" id="duelBtn" aria-label="Challenge a friend">⚔️</button>
     <h1>LOCAL <span>TRIVIA</span> LADDER</h1>
     <div class="daybar" id="dayBar"></div>
   </header>
+  <div class="duelbar hidden" id="duelBar">
+    <span id="duelBarText"></span>
+    <button class="chip" id="duelAbandonBtn">Forfeit &amp; daily</button>
+  </div>
 
   <main>
     <!-- Intro -->
@@ -96,6 +101,52 @@
   <footer>
     A <strong>Btown Games</strong> production · Read the <a href="https://www.btownbrief.com" target="_blank" rel="noopener">BTown Brief</a>
   </footer>
+
+  <!-- Duel: two friends climb the same pinned five-question ladder -->
+  <div class="overlay hidden" id="duelOverlay">
+    <div class="modal small-modal">
+      <button class="close" data-close aria-label="Close">&times;</button>
+      <h2>⚔️ Challenge a neighbor</h2>
+      <p>Same five local questions, two phones. Higher score wins; tied scores go to the faster climber. Today’s ladder stays untouched.</p>
+      <button class="btn-primary modal-action" id="hostBtn">🪜 Start a friend climb</button>
+      <button class="btn-primary modal-action" id="joinBtn">🔑 Join with a code</button>
+      <button class="chip hidden" id="rejoinBtn"></button>
+    </div>
+  </div>
+
+  <div class="overlay hidden" id="onlinePanel" data-static>
+    <div class="modal small-modal">
+      <h2 id="opTitle">Start a friend climb</h2>
+      <label class="duel-label" for="opName">Your name</label>
+      <input class="duel-input" id="opName" maxlength="24" autocomplete="nickname" placeholder="Local legend" />
+      <div id="opCodeWrap" class="hidden">
+        <label class="duel-label" for="opCode">Climb code</label>
+        <input class="duel-input duel-code" id="opCode" maxlength="4" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="ABCD" />
+      </div>
+      <p id="opError" class="duel-error hidden"></p>
+      <button class="btn-primary modal-action" id="opGo">Go</button>
+      <button class="chip" id="opCancel">Back</button>
+    </div>
+  </div>
+
+  <div class="overlay hidden" id="lobby" data-static>
+    <div class="modal small-modal">
+      <h2>Read this code to your rival</h2>
+      <div id="lobbyCode"></div>
+      <p>They tap ⚔️, choose <strong>Join with a code</strong>, and type it in. Both ladders open when they arrive.</p>
+      <p id="lobbyError" class="duel-error hidden"></p>
+      <button class="chip" id="lobbyCancel">Call off the climb</button>
+    </div>
+  </div>
+
+  <div class="overlay hidden" id="duelDone" data-static>
+    <div class="modal small-modal">
+      <h2 id="duelDoneHead"></h2>
+      <div id="duelDoneRows"></div>
+      <button class="btn-primary modal-action" id="duelRematchBtn">↻ Rematch — new ladder</button>
+      <button class="chip" id="duelExitBtn">Back to today’s ladder</button>
+    </div>
+  </div>
 
   <script type="module" src="js/main.js"></script>
 </body>
