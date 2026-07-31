@@ -80,3 +80,40 @@ export function dailyLadder(bank, dateKey = todayKey()) {
   }
   return ladder;
 }
+
+// The host uses a compact random seed once to choose five stable bank indices.
+// The indices, rather than the seed, go into the room payload so a saved duel
+// still names the exact questions after new questions are appended to the bank.
+export function duelQuestionIndices(bank, seed) {
+  if (!Number.isSafeInteger(seed) || seed < 0 || seed > 0xffffffff) {
+    throw new Error('Invalid duel seed');
+  }
+  const byId = (a, b) => (a.id < b.id ? -1 : 1);
+  return RUNG_POINTS.map((_, index) => {
+    const difficulty = index + 1;
+    const tier = bank
+      .map((question, bankIndex) => ({ ...question, bankIndex }))
+      .filter((q) => q.difficulty === difficulty)
+      .sort(byId);
+    if (tier.length === 0) throw new Error(`No questions for duel rung ${difficulty}`);
+    const pick = Math.floor(seededRand(`duel:${seed}#rung${difficulty}`) * tier.length);
+    return tier[pick].bankIndex;
+  });
+}
+
+// Returns the exact one-question-per-difficulty ladder pinned in a duel
+// payload. The payload is the sole selector; no date or current news enters.
+export function duelLadder(bank, questionIndices) {
+  if (!Array.isArray(questionIndices) || questionIndices.length !== 5
+      || new Set(questionIndices).size !== 5) {
+    throw new Error('Invalid duel question list');
+  }
+  return questionIndices.map((bankIndex, index) => {
+    const rung = index + 1;
+    const question = Number.isSafeInteger(bankIndex) ? bank[bankIndex] : null;
+    if (!question || question.difficulty !== rung) {
+      throw new Error(`Invalid question for duel rung ${rung}`);
+    }
+    return { ...question, rung, points: RUNG_POINTS[index], isNews: false };
+  });
+}

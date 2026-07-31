@@ -12,6 +12,8 @@ const SUPABASE_URL = 'https://jnouvwxomrcffqwilqkq.supabase.co/';      // e.g. '
 const SUPABASE_ANON_KEY = 'sb_publishable_RkMJQopffWlV6DSwCRkndQ_Xw6GJMf3'; // the long "anon / public" key (safe to ship)
 
 const GAME = 'trivia-ladder';
+const DUEL_MODE = typeof location !== 'undefined'
+  && new URLSearchParams(location.search).get('duel') === '1';
 
 export function lbEnabled() {
   return Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
@@ -19,7 +21,10 @@ export function lbEnabled() {
 
 function stored(key, make) {
   let v = localStorage.getItem(key);
-  if (!v) { v = make(); localStorage.setItem(key, v); }
+  if (!v) {
+    v = make();
+    if (!DUEL_MODE) localStorage.setItem(key, v);
+  }
   return v;
 }
 // shared "btown-" keys so future games on the same domain reuse the identity
@@ -31,7 +36,9 @@ function playerToken() {
     [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, '0')).join(''));
 }
 export function getName() { return localStorage.getItem('btown-player-name') || ''; }
-export function setName(n) { localStorage.setItem('btown-player-name', n.trim().slice(0, 20)); }
+export function setName(n) {
+  if (!DUEL_MODE) localStorage.setItem('btown-player-name', n.trim().slice(0, 20));
+}
 
 async function rpc(fn, args) {
   const headers = { apikey: SUPABASE_ANON_KEY, 'Content-Type': 'application/json' };
@@ -64,7 +71,7 @@ export function monthLabel(offset = 0) {
 }
 
 export async function submitScore(score) {
-  if (!lbEnabled() || !getName() || score <= 0) return;
+  if (DUEL_MODE || !lbEnabled() || !getName() || score <= 0) return;
   await rpc('submit_score', {
     p_game: GAME,
     p_player: playerId(),
@@ -75,6 +82,7 @@ export async function submitScore(score) {
 }
 
 export async function renamePlayer(name) {
+  if (DUEL_MODE) return;
   setName(name);
   if (!lbEnabled()) return;
   await rpc('rename_player', { p_player: playerId(), p_token: playerToken(), p_name: getName() });
