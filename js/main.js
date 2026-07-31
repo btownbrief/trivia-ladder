@@ -12,6 +12,7 @@ import {
   clearSession as duelClearSession,
 } from './duel.js';
 import { makeDuelResult, compareDuelResults } from './duel-rules.js';
+import { sound } from './audio.js';
 
 const $ = (id) => document.getElementById(id);
 const TIMER_MS = 25000;
@@ -58,6 +59,15 @@ let answered = false;
 let duel = null;
 let duelSubmitted = false;
 let duelStartedAt = 0;
+let scoreAnimation = 0;
+
+const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+
+function clearTransientEffects() {
+  document.querySelectorAll('.points-fly, .climb-glow').forEach((node) => node.remove());
+  cancelAnimationFrame(scoreAnimation);
+  scoreAnimation = 0;
+}
 
 // resume partial progress after a refresh (no retry-scumming)
 if (state.progress && state.progress.date !== today) delete state.progress;
@@ -86,7 +96,23 @@ try {
   throw e;
 }
 
-$('startBtn').addEventListener('click', startGame);
+function renderSoundButton() {
+  const on = sound.isEnabled();
+  $('soundBtn').textContent = on ? '🔊' : '🔇';
+  $('soundBtn').setAttribute('aria-label', on ? 'Turn sound off' : 'Turn sound on');
+  $('soundBtn').setAttribute('aria-pressed', String(on));
+}
+
+renderSoundButton();
+$('soundBtn').addEventListener('click', () => {
+  sound.setEnabled(!sound.isEnabled());
+  renderSoundButton();
+});
+
+$('startBtn').addEventListener('click', () => {
+  void sound.unlock();
+  startGame();
+});
 
 // ------------------------------------------------------------ game flow
 function startGame() {
@@ -113,6 +139,7 @@ function renderLadderRail() {
 }
 
 function showQuestion() {
+  clearTransientEffects();
   answered = false;
   const q = ladder[rungIndex];
   $('reveal').classList.add('hidden');
@@ -142,7 +169,59 @@ function tick() {
   fill.style.width = `${(left / TIMER_MS) * 100}%`;
   fill.classList.toggle('hurry', left < 6000);
   $('qTimer').textContent = Math.ceil(left / 1000);
+  $('speedBonus').textContent = `answer now: +${Math.round((left / 1000) * 2)}`;
+  $('speedBonus').style.setProperty('--bonus-width', `${(left / TIMER_MS) * 100}%`);
   if (left <= 0 && !answered) answer(-1); // time's up
+}
+
+function removeAfterAnimation(node, fallbackMs) {
+  node.addEventListener('animationend', () => node.remove(), { once: true });
+  setTimeout(() => node.remove(), fallbackMs);
+}
+
+function animateResolvedRung(correct, points) {
+  const rail = $('ladder');
+  const rungs = rail.querySelectorAll('.rung');
+  const resolved = rungs[rungIndex];
+  const next = rungs[rungIndex + 1];
+  if (!resolved) return;
+
+  resolved.classList.add('resolved-now');
+  resolved.addEventListener('animationend', () => resolved.classList.remove('resolved-now'), { once: true });
+  setTimeout(() => resolved.classList.remove('resolved-now'), 500);
+  if (reducedMotion.matches) return;
+
+  if (correct) {
+    document.querySelector('.points-fly')?.remove();
+    const cardRect = document.querySelector('.qcard').getBoundingClientRect();
+    const rungRect = resolved.getBoundingClientRect();
+    const pointsFly = document.createElement('span');
+    pointsFly.className = 'points-fly';
+    pointsFly.setAttribute('aria-hidden', 'true');
+    pointsFly.textContent = `+${points}`;
+    pointsFly.style.left = `${cardRect.left + cardRect.width / 2}px`;
+    pointsFly.style.top = `${cardRect.top + Math.min(cardRect.height * 0.42, 90)}px`;
+    pointsFly.style.setProperty('--fly-x', `${rungRect.left + rungRect.width / 2 - (cardRect.left + cardRect.width / 2)}px`);
+    pointsFly.style.setProperty('--fly-y', `${rungRect.top + rungRect.height / 2 - (cardRect.top + Math.min(cardRect.height * 0.42, 90))}px`);
+    document.body.appendChild(pointsFly);
+    removeAfterAnimation(pointsFly, 800);
+  }
+
+  if (next) {
+    rail.querySelector('.climb-glow')?.remove();
+    const railRect = rail.getBoundingClientRect();
+    const from = resolved.getBoundingClientRect();
+    const to = next.getBoundingClientRect();
+    const glow = document.createElement('span');
+    glow.className = 'climb-glow';
+    glow.setAttribute('aria-hidden', 'true');
+    glow.style.left = `${from.left + from.width / 2 - railRect.left}px`;
+    glow.style.top = `${from.top + from.height / 2 - railRect.top}px`;
+    glow.style.setProperty('--climb-x', `${to.left + to.width / 2 - (from.left + from.width / 2)}px`);
+    glow.style.setProperty('--climb-y', `${to.top + to.height / 2 - (from.top + from.height / 2)}px`);
+    rail.appendChild(glow);
+    removeAfterAnimation(glow, 750);
+  }
 }
 
 function answer(choiceIdx) {
@@ -154,6 +233,7 @@ function answer(choiceIdx) {
   const correct = choiceIdx === q.answerIndex;
   const bonus = correct ? Math.round(secondsLeft * 2) : 0; // small speed bonus, max +50
   const points = correct ? q.points + bonus : 0;
+  sound.answer(correct);
 
   [...$('choices').children].forEach((b, i) => {
     b.disabled = true;
@@ -181,6 +261,9 @@ function answer(choiceIdx) {
   state.progress = { date: today, rungs: rungResults };
   saveState(state);
   renderLadderRail();
+  $('speedBonus').textContent = correct ? `earned: +${bonus} speed` : 'speed bonus: +0';
+  $('speedBonus').style.setProperty('--bonus-width', '0%');
+  animateResolvedRung(correct, points);
 }
 
 $('nextBtn').addEventListener('click', () => {
@@ -216,15 +299,29 @@ function finishDay() {
 }
 
 function showResults(result, justFinished) {
+  clearTransientEffects();
   $('introScreen').classList.add('hidden');
   $('gameScreen').classList.add('hidden');
   $('resultsScreen').classList.remove('hidden');
 
   $('verdict').textContent = VERDICTS.find(([min]) => result.score >= min)[1];
-  $('finalScore').textContent = result.score;
-  $('streakNote').textContent = state.streak.count > 1
-    ? `🔥 ${state.streak.count}-day streak — see you tomorrow`
-    : 'Come back tomorrow to start a streak 🔥';
+  const scoreline = document.querySelector('.scoreline');
+  scoreline.setAttribute('aria-label', `${result.score} points out of 2000 plus bonus`);
+  $('finalScore').textContent = justFinished && !reducedMotion.matches ? '0' : result.score;
+
+  const streak = $('streakNote');
+  streak.classList.add('results-streak');
+  streak.innerHTML = '';
+  const flame = document.createElement('span');
+  flame.className = `streak-flame${justFinished && !reducedMotion.matches ? ' incremented' : ''}`;
+  flame.setAttribute('aria-hidden', 'true');
+  flame.style.setProperty('--flame-size', `${Math.min(38, 22 + state.streak.count * 1.4)}px`);
+  flame.textContent = '🔥';
+  const streakText = document.createElement('span');
+  streakText.textContent = state.streak.count > 1
+    ? `${state.streak.count}-day streak — see you tomorrow`
+    : 'Come back tomorrow to start a streak';
+  streak.append(flame, streakText);
 
   const recap = $('recap');
   recap.innerHTML = '';
@@ -232,6 +329,10 @@ function showResults(result, justFinished) {
     const q = ladder[i];
     const row = document.createElement('div');
     row.className = 'row';
+    if (justFinished && !reducedMotion.matches) {
+      row.classList.add('recap-enter');
+      row.style.setProperty('--recap-delay', `${i * 90}ms`);
+    }
     row.innerHTML = '<span class="emoji"></span><span class="rq"></span><span class="pts"></span>';
     row.querySelector('.emoji').textContent = r.correct ? '🟩' : '🟥';
     row.querySelector('.rq').textContent = `${q.isNews ? '📰 ' : ''}${q.q}`;
@@ -240,6 +341,22 @@ function showResults(result, justFinished) {
     if (!r.correct) pts.classList.add('zero');
     recap.appendChild(row);
   });
+
+  if (justFinished) {
+    sound.results(result.score);
+    if (!reducedMotion.matches) {
+      const started = performance.now();
+      const duration = 650;
+      const countScore = (now) => {
+        const progress = Math.min(1, (now - started) / duration);
+        const eased = 1 - (1 - progress) ** 3;
+        $('finalScore').textContent = Math.round(result.score * eased);
+        if (progress < 1) scoreAnimation = requestAnimationFrame(countScore);
+        else scoreAnimation = 0;
+      };
+      scoreAnimation = requestAnimationFrame(countScore);
+    }
+  }
 
   startCountdown();
   updateLeaderboard(justFinished ? result : null);
