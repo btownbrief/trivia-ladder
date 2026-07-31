@@ -16,6 +16,7 @@
 </head>
 <body>
   <header>
+    <button class="sound-toggle" id="soundBtn" type="button" aria-label="Turn sound on" aria-pressed="false">🔇</button>
     <button class="duel-launch" id="duelBtn" aria-label="Challenge a friend">⚔️</button>
     <h1>LOCAL <span>TRIVIA</span> LADDER</h1>
     <div class="daybar" id="dayBar"></div>
@@ -52,7 +53,10 @@
           <div class="timerbar"><div id="timerFill"></div></div>
           <div class="qmeta">
             <span id="rungLabel"></span>
-            <span id="qTimer">25</span>
+            <span class="clock">
+              <span id="speedBonus">answer now: +50</span>
+              <span id="qTimer">25</span>
+            </span>
           </div>
           <div class="qcard">
             <p id="qText"></p>
