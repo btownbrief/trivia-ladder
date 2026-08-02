@@ -106,12 +106,12 @@
     A <strong>Btown Games</strong> production · Read the <a href="https://www.btownbrief.com" target="_blank" rel="noopener">BTown Brief</a>
   </footer>
 
-  <!-- Duel: two friends climb the same pinned five-question ladder -->
+  <!-- Duel: friends climb the same pinned five-question ladder -->
   <div class="overlay hidden" id="duelOverlay">
     <div class="modal small-modal">
       <button class="close" data-close aria-label="Close">&times;</button>
       <h2>⚔️ Challenge a neighbor</h2>
-      <p>Same five local questions, two phones. Higher score wins; tied scores go to the faster climber. Today’s ladder stays untouched.</p>
+      <p>Same five local questions, two to four phones. Higher score wins; tied scores go to the faster climber. Today’s ladder stays untouched.</p>
       <button class="btn-primary modal-action" id="hostBtn">🪜 Start a friend climb</button>
       <button class="btn-primary modal-action" id="joinBtn">🔑 Join with a code</button>
       <button class="chip hidden" id="rejoinBtn"></button>
@@ -123,6 +123,14 @@
       <h2 id="opTitle">Start a friend climb</h2>
       <label class="duel-label" for="opName">Your name</label>
       <input class="duel-input" id="opName" maxlength="24" autocomplete="nickname" placeholder="Local legend" />
+      <div id="opSeatsWrap">
+        <label class="duel-label">Climbers in this heat</label>
+        <div id="opSeats" class="seat-btns" role="group" aria-label="Climbers in this heat">
+          <button class="seat-btn selected" data-seats="2" aria-pressed="true">2</button>
+          <button class="seat-btn" data-seats="3" aria-pressed="false">3</button>
+          <button class="seat-btn" data-seats="4" aria-pressed="false">4</button>
+        </div>
+      </div>
       <div id="opCodeWrap" class="hidden">
         <label class="duel-label" for="opCode">Climb code</label>
         <input class="duel-input duel-code" id="opCode" maxlength="4" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="ABCD" />
@@ -135,9 +143,11 @@
 
   <div class="overlay hidden" id="lobby" data-static>
     <div class="modal small-modal">
-      <h2>Read this code to your rival</h2>
+      <h2>Share this code with your rivals</h2>
       <div id="lobbyCode"></div>
-      <p>They tap ⚔️, choose <strong>Join with a code</strong>, and type it in. Both ladders open when they arrive.</p>
+      <div id="lobbyList"></div>
+      <button class="btn-primary modal-action" id="inviteBtn">📲 Send an invite</button>
+      <p>They tap ⚔️, choose <strong>Join with a code</strong>, and type it in. Every ladder opens when the last chair fills.</p>
       <p id="lobbyError" class="duel-error hidden"></p>
       <button class="chip" id="lobbyCancel">Call off the climb</button>
     </div>
