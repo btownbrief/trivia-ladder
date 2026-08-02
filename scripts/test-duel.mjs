@@ -186,5 +186,56 @@ t(guest.others()[0].left === true, 'guest sees that the host left');
 await expectCode(guest.submitResult(makeDuelResult(900, 80000)), 'opponent_left',
   'submit into an abandoned climb says why');
 
+/* --------------------------------------------- 3-racer heat (group duel) */
+
+device('A');
+const h3 = await Duel.create({
+  game: GAME,
+  name: 'Ada',
+  payload: { q: duelQuestionIndices(bank, 300) },
+  seats: 3,
+});
+t(h3.status === 'waiting' && h3.match.maxSeats === 3,
+  '3-seat heat opens, maxSeats tracked');
+device('B');
+const g3b = await Duel.join({ game: GAME, code: h3.code, name: 'Bea' });
+t(g3b.status === 'waiting', 'second climber seated, still waiting');
+device('C');
+const g3c = await Duel.join({ game: GAME, code: h3.code, name: 'Cal' });
+t(g3c.status === 'playing' && g3c.match.maxSeats === 3,
+  'third climber fills the heat — climb on');
+
+const ada3Result = makeDuelResult(1450, 50000);
+const bea3Result = makeDuelResult(1450, 41000);
+device('A');
+await h3.match._fetch();
+const subA = h3.submitResult(ada3Result);
+device('B');
+const subB = g3b.submitResult(bea3Result);
+await Promise.all([subA, subB]);
+device('C');
+await g3c.match._fetch();
+t(!g3c.isComplete(), 'two of three in — heat still open');
+await g3c.submitResult(makeDuelResult(0, 30000, true));
+device('A');
+await h3.match._fetch();
+device('B');
+await g3b.match._fetch();
+t(h3.isComplete() && g3b.isComplete() && h3.status === 'over',
+  'all three results merged, heat over');
+const standings = [
+  ['Ada', h3.myResult()],
+  ...h3.others().map((opponent) => [opponent.name, opponent.result]),
+].sort((a, b) => {
+  const aFinished = !a[1].gaveUp;
+  const bFinished = !b[1].gaveUp;
+  if (aFinished !== bFinished) return aFinished ? -1 : 1;
+  return aFinished ? -compareDuelResults(a[1], b[1]) : 0;
+});
+t(standings.map(([name]) => name).join(',') === 'Bea,Ada,Cal',
+  'standings rank higher score, then faster time, with forfeits last');
+t(g3b.others().every((opponent) => opponent.result),
+  'winner sees every climber result too');
+
 console.log(`\nALL DUEL TESTS PASSED (${passed} checks)`);
 process.exit(0);

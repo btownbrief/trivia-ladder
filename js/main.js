@@ -510,6 +510,18 @@ function duelActive() {
 }
 let duelPanelIntent = 'host';
 let duelChallengeKey = '';
+let duelSeats = 2;
+
+document.querySelectorAll('#opSeats .seat-btn').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    duelSeats = +btn.dataset.seats;
+    document.querySelectorAll('#opSeats .seat-btn').forEach((b) => {
+      const selected = b === btn;
+      b.classList.toggle('selected', selected);
+      b.setAttribute('aria-pressed', String(selected));
+    });
+  });
+});
 
 function duelUrl() {
   return '?duel=1';
@@ -540,7 +552,7 @@ function freshDuelPayload() {
 const FRIENDLY_DUEL_ERRORS = {
   not_found: 'That friend climb has vanished — start a fresh one.',
   not_seated: 'That seat is no longer yours — start a fresh climb.',
-  room_full: 'That ladder already has two climbers.',
+  room_full: 'That ladder is already full.',
   room_started: 'That ladder already started without you.',
   not_ready: 'Friend climbs are not switched on yet — check back soon.',
   offline: 'Can’t reach the trivia desk — are you online?',
@@ -580,6 +592,7 @@ function openDuelPanel(intent) {
   $('opTitle').textContent = intent === 'host' ? 'Start a friend climb' : 'Join a friend climb';
   $('opGo').textContent = intent === 'host' ? 'Get a code' : 'Climb!';
   $('opCodeWrap').classList.toggle('hidden', intent === 'host');
+  $('opSeatsWrap').classList.toggle('hidden', intent !== 'host');
   $('opError').classList.add('hidden');
   $('opName').value = $('opName').value
     || localStorage.getItem(DUEL_NAME_KEY)
@@ -607,6 +620,7 @@ async function duelGo() {
         game: DUEL_GAME,
         name,
         payload: freshDuelPayload(),
+        seats: duelSeats,
       });
       $('onlinePanel').classList.add('hidden');
       openDuelLobby(d);
@@ -637,10 +651,12 @@ function openDuelLobby(d) {
   if ($('lobby')._duel && $('lobby')._duel !== d) $('lobby')._duel.stop();
   $('lobby')._duel = d;
   $('lobbyCode').textContent = d.code;
+  renderLobbyRoster(d);
   $('lobby').classList.remove('hidden');
   d.start({
     onChange: () => {
       $('lobbyError').classList.add('hidden');
+      renderLobbyRoster(d);
       if (d.status !== 'waiting') location.href = duelUrl();
     },
     onError: (err) => {
@@ -651,6 +667,20 @@ function openDuelLobby(d) {
       }
     },
   });
+}
+
+function renderLobbyRoster(d) {
+  const box = $('lobbyList');
+  box.textContent = '';
+  const seated = d.match.seats || [];
+  const total = d.match.maxSeats || seated.length || 2;
+  for (let i = 0; i < total; i++) {
+    const span = document.createElement('span');
+    const who = seated[i];
+    span.textContent = (i ? ' · ' : '') + (who ? who.name : 'open chair');
+    if (!who) span.className = 'chair-empty';
+    box.appendChild(span);
+  }
 }
 
 function cancelDuelLobby() {
@@ -703,17 +733,21 @@ function exitDuel() {
   location.replace(location.pathname);
 }
 
-function duelOpponent() {
-  return duel ? (duel.others()[0] || {}) : {};
-}
-
 function renderDuelBar() {
   if (!duel) return;
-  const opp = duelOpponent();
-  const who = opp.name ? `vs ${opp.name}` : 'waiting for your rival';
+  const rivals = duel.others();
+  const who = rivals.length
+    ? `vs ${rivals.map((rival) => rival.name).join(' + ')}`
+    : 'waiting for your rivals';
   let note = '';
-  if (opp.left && !duel.isComplete()) note = ' — they stepped off';
-  else if (duelSubmitted && !duel.isComplete()) note = ' — waiting on their score…';
+  if (rivals.length && rivals.every((rival) => rival.left) && !duel.isComplete()) {
+    note = ' — they all stepped off';
+  } else if (duelSubmitted && !duel.isComplete()) {
+    const out = rivals
+      .filter((rival) => !rival.result && !rival.left)
+      .map((rival) => rival.name);
+    note = out.length ? ` — waiting on ${out.join(' + ')}…` : '';
+  }
   $('duelBarText').textContent = `⚔️ CLIMB ${duel.code} · ${who}${note}`;
   $('duelBar').classList.remove('hidden');
 }
@@ -725,32 +759,41 @@ function formatDuelTime(ms) {
   return `${minutes}:${String(seconds).padStart(2, '0')}.${tenths % 10}`;
 }
 
-function formatDuelResult(result) {
+function formatDuelResult(result, left = false) {
+  if (left && !result) return 'stepped off';
   if (!result) return 'waiting…';
   if (result.gaveUp) return 'forfeited';
   return `${result.score} pts · ${formatDuelTime(result.ms)}`;
 }
 
-function addDuelResultRow(label, result, winner) {
+function addDuelResultRow(label, result, winner, left = false) {
   const row = document.createElement('div');
   row.className = `duel-row${winner ? ' win' : ''}`;
   const name = document.createElement('span');
   name.textContent = label;
   const score = document.createElement('span');
   score.className = 'duel-time';
-  score.textContent = formatDuelResult(result);
+  score.textContent = formatDuelResult(result, left);
   row.append(name, score);
   $('duelDoneRows').appendChild(row);
 }
 
 function showDuelWaiting(message = 'LADDER LOCKED IN 🪜') {
-  const opp = duelOpponent();
-  $('duelDoneHead').textContent = opp.left
-    ? 'YOUR RIVAL STEPPED OFF'
-    : message;
+  const rivals = duel.others();
+  const out = rivals.filter((rival) => !rival.result && !rival.left).map((rival) => rival.name);
+  const allLeft = rivals.length && rivals.every((rival) => rival.left);
+  $('duelDoneHead').textContent = message !== 'LADDER LOCKED IN 🪜'
+    ? message
+    : allLeft
+      ? 'YOUR RIVALS STEPPED OFF'
+      : out.length
+        ? `WAITING ON ${out.join(' + ').toUpperCase()}…`
+        : message;
   $('duelDoneRows').innerHTML = '';
   addDuelResultRow('You', duel.myResult(), true);
-  addDuelResultRow(opp.name || 'Rival', opp.result, false);
+  for (const rival of rivals) {
+    addDuelResultRow(rival.name || 'Rival', rival.result, false, rival.left);
+  }
   $('duelRematchBtn').classList.add('hidden');
   $('duelExitBtn').textContent = 'Back to today’s ladder';
   $('duelDone').classList.remove('hidden');
@@ -769,18 +812,36 @@ function showDuelDeadEnd(message) {
 
 function showDuelDone() {
   duel.stop();
-  const mine = duel.myResult();
-  const opp = duelOpponent();
-  const theirs = opp.result;
-  const outcome = compareDuelResults(mine, theirs);
-  $('duelDoneHead').textContent = outcome === 0
-    ? 'DEAD EVEN — DRAW! 🪜'
-    : outcome > 0
-      ? 'YOU TOPPED THE LADDER! 🏆'
-      : `${(opp.name || 'YOUR RIVAL').toUpperCase()} TAKES IT`;
+  const field = [
+    { label: 'You', me: true, left: false, result: duel.myResult() },
+    ...duel.others().map((rival) => ({
+      label: rival.name || 'Rival', me: false, left: rival.left, result: rival.result,
+    })),
+  ].sort((a, b) => {
+    const aFinished = a.result && !a.result.gaveUp;
+    const bFinished = b.result && !b.result.gaveUp;
+    if (aFinished !== bFinished) return aFinished ? -1 : 1;
+    return aFinished ? -compareDuelResults(a.result, b.result) : 0;
+  });
+  const best = field.find((climber) => climber.result && !climber.result.gaveUp);
+  const winners = best
+    ? field.filter((climber) => climber.result
+      && !climber.result.gaveUp
+      && compareDuelResults(climber.result, best.result) === 0)
+    : [];
+  $('duelDoneHead').textContent = !winners.length
+    ? 'EVERYONE FORFEITED — DRAW! 🪜'
+    : winners.length > 1
+      ? 'DEAD EVEN — DRAW! 🪜'
+      : winners[0].me
+        ? 'YOU TOPPED THE LADDER! 🏆'
+        : `${winners[0].label.toUpperCase()} TAKES IT`;
   $('duelDoneRows').innerHTML = '';
-  addDuelResultRow('You', mine, outcome >= 0);
-  addDuelResultRow(opp.name || 'Rival', theirs, outcome <= 0);
+  for (const climber of field) {
+    addDuelResultRow(
+      climber.label, climber.result, winners.includes(climber), climber.left,
+    );
+  }
   $('duelRematchBtn').classList.remove('hidden');
   $('duelExitBtn').textContent = 'Back to today’s ladder';
   $('duelDone').classList.remove('hidden');
@@ -901,6 +962,35 @@ $('opCode').addEventListener('input', () => {
 document.querySelectorAll('#duelOverlay [data-close]').forEach((button) => {
   button.addEventListener('click', () => $('duelOverlay').classList.add('hidden'));
 });
+
+/* ------------------------------------------------- race-link invites */
+// Text a link instead of reading letters aloud: ?join=ABCD opens the join
+// panel with the code filled in, then scrubs the URL so refreshes don't
+// re-trigger it.
+
+$('inviteBtn').addEventListener('click', async () => {
+  const d = $('lobby')._duel;
+  if (!d) return;
+  const url = `${location.origin}${location.pathname}?join=${d.code}`;
+  const text = `Climb the Trivia Ladder with me! 🪜 Tap to join: ${url}`;
+  try {
+    if (navigator.share && /Mobi|Android|iPhone|iPad/.test(navigator.userAgent)) {
+      await navigator.share({ text });
+    } else {
+      await navigator.clipboard.writeText(url);
+      $('inviteBtn').textContent = '✓ Link copied';
+      setTimeout(() => { $('inviteBtn').textContent = '📲 Send an invite'; }, 1800);
+    }
+  } catch { /* share sheet closed */ }
+});
+
+(() => {
+  const code = new URLSearchParams(location.search).get('join');
+  if (!code || !/^[A-Za-z0-9]{4}$/.test(code)) return;
+  history.replaceState(null, '', location.pathname);
+  openDuelPanel('join');
+  $('opCode').value = code.toUpperCase();
+})();
 
 refreshDuelRejoin();
 

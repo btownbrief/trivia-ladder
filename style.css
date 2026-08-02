@@ -232,6 +232,17 @@ footer a { color: var(--gold); }
 .duel-row.win { background: rgba(255, 206, 79, .18); }
 .duel-row .duel-time { color: var(--gold); font-variant-numeric: tabular-nums; white-space: nowrap; }
 
+/* group duels: seat picker + lobby roster */
+.seat-btns { display: flex; gap: 8px; justify-content: center; }
+.seat-btn {
+  flex: 1; max-width: 64px; padding: 10px 0; border: 2px solid #4a3f96;
+  border-radius: 10px; background: var(--bg); color: var(--ink); font: inherit;
+  font-size: 18px; font-weight: 800; cursor: pointer;
+}
+.seat-btn.selected { border-color: var(--gold); background: rgba(255, 206, 79, .18); }
+#lobbyList { padding: 2px 0 4px; font-size: 14px; font-weight: 700; }
+#lobbyList .chair-empty { opacity: .45; }
+
 @keyframes rung-resolve {
   0% { transform: scale(1); }
   45% { transform: scale(1.14); box-shadow: 0 0 22px rgba(255, 206, 79, .68); }
